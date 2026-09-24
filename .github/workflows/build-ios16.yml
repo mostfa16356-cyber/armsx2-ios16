@@ -50,9 +50,18 @@ jobs:
            FREETYPE=2.14.3
            SDL=SDL3-3.4.12
           diff --git a/platforms/ios/app/src/main/cpp/CMakeLists.txt b/platforms/ios/app/src/main/cpp/CMakeLists.txt
-          index 0ebf597..c2e33f1 100644
+          index 0ebf597..7b4e050 100644
           --- a/platforms/ios/app/src/main/cpp/CMakeLists.txt
           +++ b/platforms/ios/app/src/main/cpp/CMakeLists.txt
+          @@ -15,7 +15,7 @@ set(ARMSX2_VERSION_MAJOR 2)
+           set(ARMSX2_VERSION_MINOR 5)
+           set(ARMSX2_VERSION_PATCH 3)
+           set(ARMSX2_VERSION "${ARMSX2_VERSION_MAJOR}.${ARMSX2_VERSION_MINOR}.${ARMSX2_VERSION_PATCH}")
+          -set(ARMSX2_BUILD_NUMBER 253)
+          +set(ARMSX2_BUILD_NUMBER 254)
+           
+           if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+           	set(CMAKE_C_COMPILER_WORKS 1)
           @@ -37,7 +37,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
            	endif()
            	option(ARMSX2_ENABLE_JIT_ENTITLEMENTS "Attach the Apple JIT entitlement file for provisioning profiles which allow it" ${ARMSX2_JIT_ENTITLEMENTS_DEFAULT})
@@ -62,6 +71,42 @@ jobs:
            	set(CMAKE_OSX_DEPLOYMENT_TARGET "${ARMSX2_IOS_DEPLOYMENT_TARGET}" CACHE STRING "Minimum iOS deployment target" FORCE)
            	set(ARMSX2_MACOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum Mac Catalyst deployment target")
            	if(ARMSX2_REAL_DEVICE OR ARMSX2_MAC_CATALYST)
+          diff --git a/platforms/ios/app/src/main/cpp/IOS/AppDelegate.mm b/platforms/ios/app/src/main/cpp/IOS/AppDelegate.mm
+          index d9c8a64..b12669d 100644
+          --- a/platforms/ios/app/src/main/cpp/IOS/AppDelegate.mm
+          +++ b/platforms/ios/app/src/main/cpp/IOS/AppDelegate.mm
+          @@ -5,6 +5,7 @@
+           #include <cstdio>
+           #include <cstdlib>
+           #include <cstring>
+          +#include <cstdarg>
+           #include <mach-o/dyld.h>
+           #include <string>
+           #include <unistd.h>
+          @@ -27,6 +28,23 @@
+           // Written fresh on every build, see cmake/WriteGitHash.cmake.
+           #include "armsx2_git_hash.h"
+           
+          +// Newer Xcode libc++ headers emit calls to this function, but the libc++
+          +// shipped with iOS 16.3 does not export it. Provide the same abort behavior
+          +// in the app so dyld can resolve the symbol before main() runs.
+          +namespace std {
+          +inline namespace __1 {
+          +[[noreturn]] __attribute__((visibility("default")))
+          +void __libcpp_verbose_abort(const char* format, ...) noexcept
+          +{
+          +    va_list arguments;
+          +    va_start(arguments, format);
+          +    vfprintf(stderr, format, arguments);
+          +    va_end(arguments);
+          +    abort();
+          +}
+          +}
+          +}
+          +
+           #pragma mark - SetupIOSDirectories
+           static void SetupIOSDirectories(const std::string& dataRoot)
+           {
           diff --git a/platforms/ios/app/src/main/swift/Models/AppState.swift b/platforms/ios/app/src/main/swift/Models/AppState.swift
           index a985029..28aaf4b 100644
           --- a/platforms/ios/app/src/main/swift/Models/AppState.swift
@@ -3379,6 +3424,16 @@ jobs:
         run: |
           cd upstream
           bash platforms/ios/scripts/build-ios-ipa.sh
+
+      - name: Verify iOS 16 libc++ compatibility symbol
+        run: |
+          APP=upstream/platforms/ios/build-ios-xcode/Release-iphoneos/ARMSX2iOS.app
+          SYMBOL=__ZNSt3__122__libcpp_verbose_abortEPKcz
+          nm -g "$APP/ARMSX2iOS" | grep -F "$SYMBOL"
+          if nm -u "$APP/ARMSX2iOS" | grep -Fq "$SYMBOL"; then
+            echo 'libc++ compatibility symbol is still unresolved' >&2
+            exit 1
+          fi
 
       - name: Verify minimum iOS version
         run: |
