@@ -1,0 +1,645 @@
+name: Build ARMSX2 for iPadOS 16.3
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - name: Check out ARMSX2 source
+        uses: actions/checkout@v4
+        with:
+          repository: ARMSX2/ARMSX2
+          ref: 19c83bf065ed21a19d8c46a1f578e37d2dab8efd
+          path: upstream
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Rust iOS target
+        run: rustup target add aarch64-apple-ios
+
+      - name: Apply iPadOS 16.3 compatibility patch
+        run: |
+          cat > /tmp/armsx2-ios16.patch <<'ARMSX2_IOS16_PATCH'
+          diff --git a/.github/workflows/scripts/macos/build-dependencies-embedded.sh b/.github/workflows/scripts/macos/build-dependencies-embedded.sh
+          index 95502bf..41d38a8 100755
+          --- a/.github/workflows/scripts/macos/build-dependencies-embedded.sh
+          +++ b/.github/workflows/scripts/macos/build-dependencies-embedded.sh
+          @@ -54,10 +54,13 @@ fi
+           
+           # The build passes this in: the core's own job sets one deployment target and
+           # hands it here, so the dependencies and the core are built against the same
+          -# one. The default is for running this script by hand - 17.4 matches the iOS app
+          -# in platforms/ios, and tvOS takes the same number, which is a real tvOS release
+          -# too.
+          -: ${APPLE_DEPLOYMENT_TARGET:=17.4}
+          +# one. The default is for running this script by hand. Keep the tvOS default
+          +# unchanged while matching the iOS app's minimum supported version.
+          +if [ "$APPLE_PLATFORM" = ios ]; then
+          +	: ${APPLE_DEPLOYMENT_TARGET:=16.3}
+          +else
+          +	: ${APPLE_DEPLOYMENT_TARGET:=17.4}
+          +fi
+           
+           FREETYPE=2.14.3
+           SDL=SDL3-3.4.12
+          diff --git a/platforms/ios/app/src/main/cpp/CMakeLists.txt b/platforms/ios/app/src/main/cpp/CMakeLists.txt
+          index 0ebf597..c2e33f1 100644
+          --- a/platforms/ios/app/src/main/cpp/CMakeLists.txt
+          +++ b/platforms/ios/app/src/main/cpp/CMakeLists.txt
+          @@ -37,7 +37,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+           	endif()
+           	option(ARMSX2_ENABLE_JIT_ENTITLEMENTS "Attach the Apple JIT entitlement file for provisioning profiles which allow it" ${ARMSX2_JIT_ENTITLEMENTS_DEFAULT})
+           	option(ARMSX2_IOS_DSYM "Emit a .dSYM for crash symbolication (injects -g into Release; costs link time + artifact size)" OFF)
+          -	set(ARMSX2_IOS_DEPLOYMENT_TARGET "17.4" CACHE STRING "Minimum iOS deployment target")
+          +	set(ARMSX2_IOS_DEPLOYMENT_TARGET "16.3" CACHE STRING "Minimum iOS deployment target")
+           	set(CMAKE_OSX_DEPLOYMENT_TARGET "${ARMSX2_IOS_DEPLOYMENT_TARGET}" CACHE STRING "Minimum iOS deployment target" FORCE)
+           	set(ARMSX2_MACOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum Mac Catalyst deployment target")
+           	if(ARMSX2_REAL_DEVICE OR ARMSX2_MAC_CATALYST)
+          diff --git a/platforms/ios/app/src/main/swift/Views/BIOSListView.swift b/platforms/ios/app/src/main/swift/Views/BIOSListView.swift
+          index 2cfb80d..1d8d2de 100644
+          --- a/platforms/ios/app/src/main/swift/Views/BIOSListView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/BIOSListView.swift
+          @@ -82,8 +82,8 @@ struct BIOSListView: View {
+                                               )
+                                       }
+                                   }
+          -                        .contentMargins(.top, 0, for: .scrollContent)
+          -                        .scrollBounceBehavior(.always)
+          +                        .compatContentMargins(.top, 0, for: .scrollContent)
+          +                        .compatScrollBounceAlways()
+                               }
+                           } else {
+                               List {
+          @@ -101,9 +101,9 @@ struct BIOSListView: View {
+                                           .gameCardTintMenuBackgroundListRow(backgroundActive)
+                                   }
+                               }
+          -                    .contentMargins(.top, 0, for: .scrollContent)
+          +                    .compatContentMargins(.top, 0, for: .scrollContent)
+                               .scrollContentBackground(backgroundActive ? .hidden : .automatic)
+          -                    .scrollBounceBehavior(.always)
+          +                    .compatScrollBounceAlways()
+           #if targetEnvironment(macCatalyst)
+                               .listStyle(.inset)
+           #endif
+          @@ -218,7 +218,7 @@ struct BIOSListView: View {
+                           scheduleBIOSRefresh(after: .milliseconds(0))
+                       }
+                   }
+          -        .onChange(of: menuTabIsActive) { _, isActive in
+          +        .onChangeCompat(of: menuTabIsActive) { _, isActive in
+                       guard isActive, BIOSRefreshPending || !hasLoadedBIOSes else {
+                           return
+                       }
+          diff --git a/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicColours.swift b/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicColours.swift
+          index f0ced2a..3d08fe4 100644
+          --- a/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicColours.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicColours.swift
+          @@ -1208,10 +1208,10 @@ struct ThemePaletteEditor: View {
+             var body: some View {
+               editorSurface
+                 .preferredColorScheme(.dark)
+          -      .presentationBackground(.clear)
+          +      .compatPresentationBackground(.clear)
+                 .presentationDragIndicator(isShowingBackgroundOnly ? .hidden : .visible)
+                 .onAppear(perform: prepareEditor)
+          -      .onChange(of: currentEditorSnapshot) { oldSnapshot, newSnapshot in
+          +      .onChangeCompat(of: currentEditorSnapshot) { oldSnapshot, newSnapshot in
+                   handleEditorSnapshotChange(from: oldSnapshot, to: newSnapshot)
+                 }
+                 .onDisappear(perform: tearDownEditor)
+          @@ -1267,7 +1267,7 @@ struct ThemePaletteEditor: View {
+                   ScrollView {
+                     editorSections
+                   }
+          -        .onChange(of: scrollToTopRequest) { _, _ in
+          +        .onChangeCompat(of: scrollToTopRequest) { _, _ in
+                     var transaction = Transaction(animation: nil)
+                     transaction.disablesAnimations = true
+                     withTransaction(transaction) {
+          diff --git a/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicSettings.swift b/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicSettings.swift
+          index 0f67ce5..fad7403 100644
+          --- a/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicSettings.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/Background/Dynamic/DynamicSettings.swift
+          @@ -747,7 +747,7 @@ struct DynamicBackgroundSettingsControls: View {
+             var body: some View {
+               settingsContent
+                 .onAppear(perform: expandCurrentBackgroundSettings)
+          -      .onChange(of: dynamicBackground) { _, _ in
+          +      .onChangeCompat(of: dynamicBackground) { _, _ in
+                   expandCurrentBackgroundSettings()
+                 }
+             }
+          @@ -1001,7 +1001,7 @@ struct DynamicParticleSettingsControls: View {
+             var body: some View {
+               particleSection
+                 .onAppear { showsBackgroundSettings = true }
+          -      .onChange(of: dynamicBackground) { _, _ in
+          +      .onChangeCompat(of: dynamicBackground) { _, _ in
+                   showsBackgroundSettings = true
+                 }
+             }
+          diff --git a/platforms/ios/app/src/main/swift/Views/GameListView.swift b/platforms/ios/app/src/main/swift/Views/GameListView.swift
+          index 2a20b36..2ae8eb0 100644
+          --- a/platforms/ios/app/src/main/swift/Views/GameListView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/GameListView.swift
+          @@ -1017,7 +1017,7 @@ struct GameListView: View {
+                           selection: $selectedCoverPhotoItem,
+                           matching: .images
+                       )
+          -            .onChange(of: selectedCoverPhotoItem) { _, photoItem in
+          +            .onChangeCompat(of: selectedCoverPhotoItem) { _, photoItem in
+                           guard let photoItem, let gameName = pendingCoverPhotoGameName else { return }
+                           selectedCoverPhotoItem = nil
+                           pendingCoverPhotoGameName = nil
+          @@ -1031,8 +1031,8 @@ struct GameListView: View {
+                           PerGameSettingsPanel(game: game)
+                               .presentationDetents([.large])
+                               .presentationDragIndicator(.visible)
+          -                    .presentationBackground(.clear)
+          -                    .presentationCornerRadius(34)
+          +                    .compatPresentationBackground(.clear)
+          +                    .compatPresentationCornerRadius(34)
+                       }
+                       .sheet(item: $discLinkTarget) { game in
+                           DiscLinkPicker(discs: games.filter { !$0.isELF && $0.id != game.id }) { selected in
+          @@ -1128,10 +1128,10 @@ struct GameListView: View {
+                               .menuBackgroundListRow(hasCustomBackground)
+                       }
+                   }
+          -        .contentMargins(.top, 0, for: .scrollContent)
+          +        .compatContentMargins(.top, 0, for: .scrollContent)
+                   .scrollContentBackground(hasCustomBackground ? .hidden : .automatic)
+                   .scrollDisabled(false)
+          -        .scrollBounceBehavior(.always)
+          +        .compatScrollBounceAlways()
+                   .trackGameLibraryScrollPhase(gameLibraryActivity)
+                   .transaction { transaction in
+                       if transaction.isContinuous || gameLibraryActivity.isScrolling {
+          @@ -1177,9 +1177,9 @@ struct GameListView: View {
+                       }
+                       .padding(.top, showsPageOwnedLargeTitle ? 0 : 12)
+                   }
+          -        .contentMargins(.top, 0, for: .scrollContent)
+          +        .compatContentMargins(.top, 0, for: .scrollContent)
+                   .scrollDisabled(false)
+          -        .scrollBounceBehavior(.always)
+          +        .compatScrollBounceAlways()
+                   .trackGameLibraryScrollPhase(gameLibraryActivity)
+                   .transaction { transaction in
+                       if transaction.isContinuous || gameLibraryActivity.isScrolling {
+          @@ -1220,9 +1220,9 @@ struct GameListView: View {
+                               )
+                       }
+                   }
+          -        .contentMargins(.top, 0, for: .scrollContent)
+          +        .compatContentMargins(.top, 0, for: .scrollContent)
+                   .scrollDisabled(false)
+          -        .scrollBounceBehavior(.always)
+          +        .compatScrollBounceAlways()
+                   .background(
+                       Group {
+                           if hasCustomBackground {
+          @@ -1288,7 +1288,7 @@ struct GameListView: View {
+                       .padding(.vertical, metrics.verticalPadding)
+                   }
+                   .scrollDisabled(false)
+          -        .scrollBounceBehavior(.always, axes: .horizontal)
+          +        .compatScrollBounceAlways(axes: .horizontal)
+                   .trackGameLibraryScrollPhase(gameLibraryActivity)
+                   .transaction { transaction in
+                       if transaction.isContinuous || gameLibraryActivity.isScrolling {
+          @@ -1356,7 +1356,7 @@ struct GameListView: View {
+                                   )
+                                       .foregroundStyle(isStopping ? .red : .green)
+                                       .font(.title)
+          -                            .contentTransition(.symbolEffect(.replace))
+          +                            .compatReplaceSymbolTransition()
+           
+                                   RunningStatusText(
+                                       isStopping: isStopping,
+          @@ -1651,11 +1651,7 @@ struct GameListView: View {
+                           }
+                           .frame(minWidth: 44, minHeight: 44)
+                           .contentShape(Rectangle())
+          -                .contentTransition(.symbolEffect)
+          -                .symbolEffect(
+          -                    .bounce,
+          -                    value: favoriteAnimationValues[game.id, default: 0]
+          -                )
+          +                .compatFavoriteSymbolEffect(value: favoriteAnimationValues[game.id, default: 0])
+                   }
+                   .buttonStyle(.plain)
+                   .accessibilityLabel(
+          @@ -1697,7 +1693,7 @@ struct GameListView: View {
+                           )
+                               .font(.title2)
+                               .foregroundStyle(isStopping ? .red : .green)
+          -                    .contentTransition(.symbolEffect(.replace))
+          +                    .compatReplaceSymbolTransition()
+           
+                           RunningStatusText(
+                               isStopping: isStopping,
+          @@ -1755,7 +1751,7 @@ struct GameListView: View {
+                           )
+                               .font(.system(size: metrics.statusIconSize))
+                               .foregroundStyle(isStopping ? .red : .green)
+          -                    .contentTransition(.symbolEffect(.replace))
+          +                    .compatReplaceSymbolTransition()
+           
+                           RunningStatusText(
+                               isStopping: isStopping,
+          diff --git a/platforms/ios/app/src/main/swift/Views/GameScreenView.swift b/platforms/ios/app/src/main/swift/Views/GameScreenView.swift
+          index 5a9ab1b..4afb2cc 100644
+          --- a/platforms/ios/app/src/main/swift/Views/GameScreenView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/GameScreenView.swift
+          @@ -429,7 +429,7 @@ struct GameScreenView: View {
+                       }
+                       .preference(key: GameScreenSizePreferenceKey.self, value: screen)
+                       // Off the safe region, not the preference: the status bar moves one, not the other.
+          -            .onChange(of: geo.size) { _, _ in syncFullscreenStateFromWindow() }
+          +            .onChangeCompat(of: geo.size) { _, _ in syncFullscreenStateFromWindow() }
+                   }
+                   .onPreferenceChange(GameScreenSizePreferenceKey.self) { size in
+                       // The window, so only a real rotation reaches this.
+          @@ -539,10 +539,10 @@ struct GameScreenView: View {
+                   // (any non-hidden route keeps the VM paused), so one observer covers every child
+                   // open/dismiss regardless of which screen it was. This replaces the seven per-screen
+                   // observers that existed for the old independent booleans.
+          -        .onChange(of: overlayRoute) { _, _ in
+          +        .onChangeCompat(of: overlayRoute) { _, _ in
+                       updateRuntimeOverlayPause()
+                   }
+          -        .onChange(of: scenePhase) { _, newPhase in
+          +        .onChangeCompat(of: scenePhase) { _, newPhase in
+                       if newPhase == .background {
+                           wasBackgrounded = true
+                       } else if newPhase == .active {
+          @@ -555,10 +555,10 @@ struct GameScreenView: View {
+                           wasBackgrounded = false
+                       }
+                   }
+          -        .onChange(of: fullScreen) { _, isEnabled in
+          +        .onChangeCompat(of: fullScreen) { _, isEnabled in
+                       applyFullscreenState(isEnabled)
+                   }
+          -        .onChange(of: settings.hideMenuButton) { _, isHidden in
+          +        .onChangeCompat(of: settings.hideMenuButton) { _, isHidden in
+                       // Keep the runtime menu-button flag in lockstep with the persisted setting so
+                       // re-enabling it (from the quick menu or settings) restores the button at once.
+                       if menuButtonHidden != isHidden {
+          @@ -566,14 +566,14 @@ struct GameScreenView: View {
+                       }
+                       cancelMenuButtonReveal()
+                   }
+          -        .onChange(of: settings.emulationOnlyModeEnabled) { _, isEnabled in
+          +        .onChangeCompat(of: settings.emulationOnlyModeEnabled) { _, isEnabled in
+                       if isEnabled {
+                           enterEmulationOnlyModeIfReady()
+                       } else {
+                           cancelEmulationOnlyTransition()
+                       }
+                   }
+          -        .onChange(of: appState.emulationOnlyStartupReady) { _, isReady in
+          +        .onChangeCompat(of: appState.emulationOnlyStartupReady) { _, isReady in
+                       if isReady {
+                           enterEmulationOnlyModeIfReady()
+                       }
+          diff --git a/platforms/ios/app/src/main/swift/Views/IOS16Compatibility.swift b/platforms/ios/app/src/main/swift/Views/IOS16Compatibility.swift
+          new file mode 100644
+          index 0000000..198e0d0
+          --- /dev/null
+          +++ b/platforms/ios/app/src/main/swift/Views/IOS16Compatibility.swift
+          @@ -0,0 +1,81 @@
+          +import SwiftUI
+          +
+          +// Keep newer presentation and scroll styling on supported systems while letting
+          +// the same frontend run on iPadOS 16.3.
+          +enum CompatContentMarginPlacement {
+          +    case scrollContent
+          +}
+          +
+          +extension View {
+          +    // The two-value SwiftUI overload starts with iOS 17. Capturing the value in
+          +    // the older overload preserves the previous value when the closure fires.
+          +    func onChangeCompat<Value: Equatable>(
+          +        of value: Value,
+          +        perform action: @escaping (Value, Value) -> Void
+          +    ) -> some View {
+          +        onChange(of: value) { [value] newValue in
+          +            action(value, newValue)
+          +        }
+          +    }
+          +
+          +    @ViewBuilder
+          +    func compatContentMargins(
+          +        _ edges: Edge.Set,
+          +        _ length: CGFloat,
+          +        for placement: CompatContentMarginPlacement
+          +    ) -> some View {
+          +        if #available(iOS 17.0, *) {
+          +            contentMargins(edges, length, for: .scrollContent)
+          +        } else if edges == .bottom {
+          +            padding(.bottom, length)
+          +        } else {
+          +            self
+          +        }
+          +    }
+          +
+          +    @ViewBuilder
+          +    func compatScrollBounceAlways(axes: Axis.Set = .vertical) -> some View {
+          +        if #available(iOS 16.4, *) {
+          +            scrollBounceBehavior(.always, axes: axes)
+          +        } else {
+          +            self
+          +        }
+          +    }
+          +
+          +    @ViewBuilder
+          +    func compatPresentationBackground(_ color: Color) -> some View {
+          +        if #available(iOS 16.4, *) {
+          +            presentationBackground(color)
+          +        } else {
+          +            self
+          +        }
+          +    }
+          +
+          +    @ViewBuilder
+          +    func compatPresentationCornerRadius(_ radius: CGFloat) -> some View {
+          +        if #available(iOS 16.4, *) {
+          +            presentationCornerRadius(radius)
+          +        } else {
+          +            self
+          +        }
+          +    }
+          +
+          +    @ViewBuilder
+          +    func compatReplaceSymbolTransition() -> some View {
+          +        if #available(iOS 17.0, *) {
+          +            contentTransition(.symbolEffect(.replace))
+          +        } else {
+          +            self
+          +        }
+          +    }
+          +
+          +    @ViewBuilder
+          +    func compatFavoriteSymbolEffect(value: Int) -> some View {
+          +        if #available(iOS 17.0, *) {
+          +            contentTransition(.symbolEffect)
+          +                .symbolEffect(.bounce, value: value)
+          +        } else {
+          +            self
+          +        }
+          +    }
+          +}
+          diff --git a/platforms/ios/app/src/main/swift/Views/RootView.swift b/platforms/ios/app/src/main/swift/Views/RootView.swift
+          index d16f4bf..aeb8c18 100644
+          --- a/platforms/ios/app/src/main/swift/Views/RootView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/RootView.swift
+          @@ -667,7 +667,7 @@ struct MenuTabView: View {
+                           )
+                           .frame(maxWidth: .infinity, maxHeight: .infinity)
+                           .tint(.blue)
+          -                .contentMargins(
+          +                .compatContentMargins(
+                               .bottom,
+                               tabContentBottomMargin,
+                               for: .scrollContent
+          @@ -721,13 +721,13 @@ struct MenuTabView: View {
+                       backgroundHost.reactivateForMenu(isAvailable: settings.hasCustomBackground)
+                       backgroundHost.setPresentationVisible(selectedTabShowsBackground)
+                   }
+          -        .onChange(of: settings.hasCustomBackground) { _, hasBackground in
+          +        .onChangeCompat(of: settings.hasCustomBackground) { _, hasBackground in
+                       backgroundHost.setMenuBackgroundAvailable(hasBackground)
+                   }
+          -        .onChange(of: settings.dynamicBackgroundsEnabled) { _, _ in
+          +        .onChangeCompat(of: settings.dynamicBackgroundsEnabled) { _, _ in
+                       backgroundHost.setMenuBackgroundAvailable(settings.hasCustomBackground)
+                   }
+          -        .onChange(of: selectedTabShowsBackground) { _, showsBackground in
+          +        .onChangeCompat(of: selectedTabShowsBackground) { _, showsBackground in
+                       backgroundHost.setPresentationVisible(showsBackground)
+                   }
+                   .onDisappear {
+          @@ -1212,7 +1212,7 @@ private struct SafeAreaProtectedMenuTabContent<Content: View>: View {
+                           .padding(.leading, layoutDirection == .rightToLeft ? insets.right : insets.left)
+                           .padding(.trailing, layoutDirection == .rightToLeft ? insets.left : insets.right)
+                           .frame(maxWidth: .infinity, maxHeight: .infinity)
+          -                .onChange(of: geometry.size) { _, _ in
+          +                .onChangeCompat(of: geometry.size) { _, _ in
+                               safeAreaInsets = KeyWindowSafeArea.horizontalInsets()
+                           }
+                       }
+          diff --git a/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift b/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift
+          index 69ac630..3ae5066 100644
+          --- a/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift
+          @@ -60,7 +60,7 @@ struct AppearanceSettingsView: View {
+                           } label: {
+                               Label(settings.localized("Portrait Fit Mode"), systemImage: "rectangle.portrait")
+                           }
+          -                .onChange(of: settings.backgroundFitMode) { _, _ in
+          +                .onChangeCompat(of: settings.backgroundFitMode) { _, _ in
+                               UISelectionFeedbackGenerator().selectionChanged()
+                           }
+           
+          @@ -73,7 +73,7 @@ struct AppearanceSettingsView: View {
+                           } label: {
+                               Label(settings.localized("Landscape Fit Mode"), systemImage: "rectangle")
+                           }
+          -                .onChange(of: settings.backgroundLandscapeFitMode) { _, _ in
+          +                .onChangeCompat(of: settings.backgroundLandscapeFitMode) { _, _ in
+                               UISelectionFeedbackGenerator().selectionChanged()
+                           }
+           
+          @@ -137,7 +137,7 @@ struct AppearanceSettingsView: View {
+                       synchronizeExclusivePreview()
+                       dynamicPreferences = settings.dynamicAppearancePreferences
+                   }
+          -        .onChange(of: menuTabIsActive) { _, _ in
+          +        .onChangeCompat(of: menuTabIsActive) { _, _ in
+                       synchronizeExclusivePreview()
+                   }
+                   .onDisappear {
+          diff --git a/platforms/ios/app/src/main/swift/Views/Settings/BackgroundSourcePicker.swift b/platforms/ios/app/src/main/swift/Views/Settings/BackgroundSourcePicker.swift
+          index 746ee4a..67d9e95 100644
+          --- a/platforms/ios/app/src/main/swift/Views/Settings/BackgroundSourcePicker.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/Settings/BackgroundSourcePicker.swift
+          @@ -35,7 +35,7 @@ struct BackgroundSourcePicker: ViewModifier {
+                           Button(settings.localized("Cancel"), role: .cancel) {}
+                       }
+                       .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .any(of: [.images, .videos]))
+          -            .onChange(of: selectedPhotoItem) { _, item in
+          +            .onChangeCompat(of: selectedPhotoItem) { _, item in
+                           guard let item else { return }
+                           selectedPhotoItem = nil
+                           Task { @MainActor in await importPhotoItem(item) }
+          diff --git a/platforms/ios/app/src/main/swift/Views/Settings/MemoryCardSettingsView.swift b/platforms/ios/app/src/main/swift/Views/Settings/MemoryCardSettingsView.swift
+          index d089511..a3770ea 100644
+          --- a/platforms/ios/app/src/main/swift/Views/Settings/MemoryCardSettingsView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/Settings/MemoryCardSettingsView.swift
+          @@ -38,7 +38,7 @@ struct MemoryCardSettingsView: View {
+                                   Text(card).tag(card)
+                               }
+                           }
+          -                .onChange(of: slot1Card) { _, newValue in
+          +                .onChangeCompat(of: slot1Card) { _, newValue in
+                               ARMSX2Bridge.setMemoryCard(name: newValue, forSlot: 1, enabled: !newValue.isEmpty)
+                           }
+           
+          @@ -48,7 +48,7 @@ struct MemoryCardSettingsView: View {
+                                   Text(card).tag(card)
+                               }
+                           }
+          -                .onChange(of: slot2Card) { _, newValue in
+          +                .onChangeCompat(of: slot2Card) { _, newValue in
+                               ARMSX2Bridge.setMemoryCard(name: newValue, forSlot: 2, enabled: !newValue.isEmpty)
+                           }
+           
+          diff --git a/platforms/ios/app/src/main/swift/Views/Settings/NumberRow.swift b/platforms/ios/app/src/main/swift/Views/Settings/NumberRow.swift
+          index d3784e1..7be53a4 100644
+          --- a/platforms/ios/app/src/main/swift/Views/Settings/NumberRow.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/Settings/NumberRow.swift
+          @@ -441,12 +441,12 @@ struct NumberRow: View {
+               var body: some View {
+                   content
+                       .padding(.vertical, rowStyle.verticalPadding)
+          -            .onChange(of: store.wrappedValue) { _, _ in
+          +            .onChangeCompat(of: store.wrappedValue) { _, _ in
+                           guard isDragging else { return }
+                           activity.update(localizedTitle, displayText, true)
+                       }
+          -            .onChange(of: draft) { _, _ in draftChanged() }
+          -            .onChange(of: fieldFocused) { _, focused in
+          +            .onChangeCompat(of: draft) { _, _ in draftChanged() }
+          +            .onChangeCompat(of: fieldFocused) { _, focused in
+                           if !focused { commit() }
+                       }
+                       .onDisappear(perform: release)
+          diff --git a/platforms/ios/app/src/main/swift/Views/Settings/SettingsRootView.swift b/platforms/ios/app/src/main/swift/Views/Settings/SettingsRootView.swift
+          index 8c69028..4c61122 100644
+          --- a/platforms/ios/app/src/main/swift/Views/Settings/SettingsRootView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/Settings/SettingsRootView.swift
+          @@ -332,7 +332,7 @@ struct SettingsRootView: View {
+                           .gameCardTintMenuBackgroundListRow(backgroundActive)
+                       }
+                   }
+          -        .contentMargins(.top, 0, for: .scrollContent)
+          +        .compatContentMargins(.top, 0, for: .scrollContent)
+                   .scrollContentBackground(backgroundActive ? .hidden : .automatic)
+                   }
+                   .stableMenuContentGlassContainer()
+          @@ -357,7 +357,7 @@ struct SettingsRootView: View {
+                           refreshJITStatus()
+                       }
+                   }
+          -        .onChange(of: menuTabIsActive) { _, isActive in
+          +        .onChangeCompat(of: menuTabIsActive) { _, isActive in
+                       if isActive && !hasLoadedJITStatus {
+                           refreshJITStatus()
+                       }
+          @@ -373,7 +373,7 @@ struct SettingsRootView: View {
+                       settingsDetail(for: pane)
+                   }
+                   }
+          -        .onChange(of: resetToRootRequest) { _, _ in
+          +        .onChangeCompat(of: resetToRootRequest) { _, _ in
+                       guard !navigationPath.isEmpty else { return }
+                       var transaction = Transaction(animation: nil)
+                       transaction.disablesAnimations = true
+          @@ -381,7 +381,7 @@ struct SettingsRootView: View {
+                           navigationPath.removeAll()
+                       }
+                   }
+          -        .onChange(of: navigationPath.isEmpty) { _, isEmpty in
+          +        .onChangeCompat(of: navigationPath.isEmpty) { _, isEmpty in
+                       onNavigationPathActivityChanged(!isEmpty)
+                   }
+                   .onAppear {
+          @@ -668,7 +668,7 @@ private struct NetworkSettingsView: View {
+                       loadNetworkAdaptersIfNeeded()
+                       loadHosts()
+                   }
+          -        .onChange(of: hosts) { _, newHosts in
+          +        .onChangeCompat(of: hosts) { _, newHosts in
+                       guard hasLoadedHosts, newHosts != lastPersistedHosts else {
+                           return
+                       }
+          diff --git a/platforms/ios/app/src/main/swift/Views/VirtualControllerView.swift b/platforms/ios/app/src/main/swift/Views/VirtualControllerView.swift
+          index 48976a8..2621e2e 100644
+          --- a/platforms/ios/app/src/main/swift/Views/VirtualControllerView.swift
+          +++ b/platforms/ios/app/src/main/swift/Views/VirtualControllerView.swift
+          @@ -307,32 +307,32 @@ struct VirtualControllerView: View {
+                       activeTouchActionSession.refreshHardcoreAutomaticFireRestriction()
+                       configureAuxiliaryInputs()
+                   }
+          -        .onChange(of: skinLibrary.selectedSkinID) { _, _ in
+          +        .onChangeCompat(of: skinLibrary.selectedSkinID) { _, _ in
+                       ARMSX2VirtualPadMaskImageCache.prewarm(descriptor: effectiveSkinDescriptor)
+                   }
+          -        .onChange(of: skinDescriptor) { _, _ in
+          +        .onChangeCompat(of: skinDescriptor) { _, _ in
+                       ARMSX2VirtualPadMaskImageCache.prewarm(descriptor: effectiveSkinDescriptor)
+                   }
+          -        .onChange(of: dynamicSettings.swipeCamera) { _, _ in
+          +        .onChangeCompat(of: dynamicSettings.swipeCamera) { _, _ in
+                       resetDynamicInputs()
+                       configureAuxiliaryInputs()
+                   }
+          -        .onChange(of: dynamicSettings.gyroscopeCamera) { _, _ in
+          +        .onChangeCompat(of: dynamicSettings.gyroscopeCamera) { _, _ in
+                       configureAuxiliaryInputs()
+                   }
+          -        .onChange(of: dynamicSettings.legacyThumbsticks) { _, _ in
+          +        .onChangeCompat(of: dynamicSettings.legacyThumbsticks) { _, _ in
+                       resetDynamicInputs()
+                   }
+          -        .onChange(of: dynamicSettings.dynamicThumbsticks) { _, _ in
+          +        .onChangeCompat(of: dynamicSettings.dynamicThumbsticks) { _, _ in
+                       resetDynamicInputs()
+                   }
+          -        .onChange(of: dynamicSettings.convertSwipeToDynamicJoystick) { _, _ in
+          +        .onChangeCompat(of: dynamicSettings.convertSwipeToDynamicJoystick) { _, _ in
+                       resetDynamicInputs()
+                   }
+          -        .onChange(of: dynamicSettings.leftThumbstickActionsEnabled) { _, _ in
+          +        .onChangeCompat(of: dynamicSettings.leftThumbstickActionsEnabled) { _, _ in
+                       resetDynamicInputs()
+                   }
+          -        .onChange(of: dynamicSettings.rightThumbstickActionsEnabled) { _, _ in
+          +        .onChangeCompat(of: dynamicSettings.rightThumbstickActionsEnabled) { _, _ in
+                       resetDynamicInputs()
+                   }
+                   .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+          ARMSX2_IOS16_PATCH
+          cd upstream
+          git apply --check /tmp/armsx2-ios16.patch
+          git apply /tmp/armsx2-ios16.patch
+
+      - name: Build unsigned IPA
+        run: |
+          cd upstream
+          bash platforms/ios/scripts/build-ios-ipa.sh
+
+      - name: Verify minimum iOS version
+        run: |
+          APP=upstream/platforms/ios/build-ios-xcode/Release-iphoneos/ARMSX2iOS.app
+          ACTUAL=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist")
+          test "$ACTUAL" = "16.3"
+          test -f upstream/platforms/ios/build-ios-xcode/ARMSX2-iOS-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARMSX2-iPadOS-16.3-unsigned
+          path: upstream/platforms/ios/build-ios-xcode/ARMSX2-iOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
