@@ -2839,20 +2839,18 @@ jobs:
                @State private var pendingExport: AppIconOption?
                @State private var shareItem: ShareSheetItem?
           diff --git a/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift b/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift
-          index 69ac630..dcafa44 100644
+          index 69ac630..2d4a9d2 100644
           --- a/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift
           +++ b/platforms/ios/app/src/main/swift/Views/Settings/AppearanceSettingsView.swift
-          @@ -10,8 +10,8 @@ struct AppearanceSettingsView: View {
+          @@ -10,7 +10,7 @@ struct AppearanceSettingsView: View {
                    var id: String { rawValue }
                }
            
           -    @State private var settings = SettingsStore.shared
-          -    @State private var dynamicPreferences = SettingsStore.shared.dynamicAppearancePreferences
           +    @ObservedObject private var settings = SettingsStore.shared
-          +    @ObservedObject private var dynamicPreferences = SettingsStore.shared.dynamicAppearancePreferences
+               @State private var dynamicPreferences = SettingsStore.shared.dynamicAppearancePreferences
                @State private var paletteTarget: ThemePaletteTarget = .shared
                @State private var presentedEditor: PresentedEditor?
-               @State private var isShowingBackgroundOnly = false
           @@ -60,7 +60,7 @@ struct AppearanceSettingsView: View {
                            } label: {
                                Label(settings.localized("Portrait Fit Mode"), systemImage: "rectangle.portrait")
